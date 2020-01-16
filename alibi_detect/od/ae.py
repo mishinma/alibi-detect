@@ -32,7 +32,7 @@ class OutlierAE(BaseDetector, FitMixin, ThresholdMixin):
         decoder_net
             Layers for the decoder wrapped in a tf.keras.Sequential class if no 'ae' is specified.
         data_type
-            Optionally specifiy the data type (tabular, image or time-series). Added to metadata.
+            Optionally specify the data type (tabular, image or time-series). Added to metadata.
         """
         super().__init__()
 

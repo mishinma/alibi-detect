@@ -6,17 +6,11 @@ import os
 import pickle
 import tensorflow as tf
 from typing import Dict, Union
-from alibi_detect.ad.adversarialvae import AdversarialVAE
-from alibi_detect.models.autoencoder import AEGMM, AE, VAE, VAEGMM
-from alibi_detect.od.aegmm import OutlierAEGMM
+from alibi_detect.ad import AdversarialVAE
 from alibi_detect.base import BaseDetector
-from alibi_detect.od.isolationforest import IForest
-from alibi_detect.od.mahalanobis import Mahalanobis
-from alibi_detect.od.prophet import OutlierProphet
-from alibi_detect.od.ae import OutlierAE
-from alibi_detect.od.vae import OutlierVAE
-from alibi_detect.od.vaegmm import OutlierVAEGMM
-from alibi_detect.od.sr import SpectralResidual
+from alibi_detect.models.autoencoder import AE, AEGMM, DecoderLSTM, EncoderLSTM, Seq2Seq, VAE, VAEGMM
+from alibi_detect.od import (IForest, Mahalanobis, OutlierAE, OutlierAEGMM, OutlierProphet,
+                             OutlierSeq2Seq, OutlierVAE, OutlierVAEGMM, SpectralResidual)
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +20,9 @@ Data = Union[
     IForest,
     Mahalanobis,
     OutlierAEGMM,
-    OutlierProphet,
     OutlierAE,
+    OutlierProphet,
+    OutlierSeq2Seq,
     OutlierVAE,
     OutlierVAEGMM,
     SpectralResidual
@@ -37,9 +32,10 @@ DEFAULT_DETECTORS = [
     'AdversarialVAE',
     'IForest',
     'Mahalanobis',
+    'OutlierAE',
     'OutlierAEGMM',
     'OutlierProphet',
-    'OutlierAE',
+    'OutlierSeq2Seq',
     'OutlierVAE',
     'OutlierVAEGMM',
     'SpectralResidual'
@@ -89,6 +85,8 @@ def save_detector(detector: Data,
         state_dict = state_prophet(detector)
     elif detector_name == 'SpectralResidual':
         state_dict = state_sr(detector)
+    elif detector_name == 'OutlierSeq2Seq':
+        state_dict = state_s2s(detector)
 
     with open(os.path.join(filepath, detector_name + '.pickle'), 'wb') as f:
         pickle.dump(state_dict, f)
@@ -105,6 +103,8 @@ def save_detector(detector: Data,
     elif detector_name == 'AdversarialVAE':
         save_tf_vae(detector, filepath)
         save_tf_model(detector.model, filepath)
+    elif detector_name == 'OutlierSeq2Seq':
+        save_tf_s2s(detector, filepath)
 
 
 def state_iforest(od: IForest) -> Dict:
@@ -268,6 +268,23 @@ def state_sr(od: SpectralResidual) -> Dict:
                   'window_local': od.window_local,
                   'n_est_points': od.n_est_points,
                   'n_grad_points': od.n_grad_points}
+    return state_dict
+
+
+def state_s2s(od: OutlierSeq2Seq) -> Dict:
+    """
+    OutlierSeq2Seq parameters to save.
+
+    Parameters
+    ----------
+    od
+        Outlier detector object.
+    """
+    state_dict = {'threshold': od.threshold,
+                  'beta': od.seq2seq.beta,
+                  'shape': od.shape,
+                  'latent_dim': od.latent_dim,
+                  'output_activation': od.output_activation}
     return state_dict
 
 
@@ -442,6 +459,36 @@ def save_tf_vaegmm(od: OutlierVAEGMM,
         logger.warning('No `tf.keras.Model` VAEGMM detected. No VAEGMM saved.')
 
 
+def save_tf_s2s(od: OutlierSeq2Seq,
+                filepath: str) -> None:
+    """
+    Save TensorFlow components of OutlierSeq2Seq.
+
+    Parameters
+    ----------
+    od
+        Outlier detector object.
+    filepath
+        Save directory.
+    """
+    # create folder for model weights
+    if not os.path.isdir(filepath):
+        logger.warning('Directory {} does not exist and is now created.'.format(filepath))
+        os.mkdir(filepath)
+    model_dir = os.path.join(filepath, 'model')
+    if not os.path.isdir(model_dir):
+        os.mkdir(model_dir)
+    # save seq2seq model weights and threshold estimation network
+    if isinstance(od.seq2seq.threshold_net, tf.keras.Sequential):
+        od.seq2seq.threshold_net.save(os.path.join(model_dir, 'threshold_net.h5'))
+    else:
+        logger.warning('No `tf.keras.Sequential` threshold estimation net detected. No threshold net saved.')
+    if isinstance(od.seq2seq, tf.keras.Model):
+        od.seq2seq.save_weights(os.path.join(model_dir, 'seq2seq.ckpt'))
+    else:
+        logger.warning('No `tf.keras.Model` Seq2Seq detected. No Seq2Seq model saved.')
+
+
 def load_detector(filepath: str) -> Data:
     """
     Load outlier or adversarial detector.
@@ -494,6 +541,9 @@ def load_detector(filepath: str) -> Data:
         detector = init_od_prophet(state_dict)
     elif detector_name == 'SpectralResidual':
         detector = init_od_sr(state_dict)
+    elif detector_name == 'OutlierSeq2Seq':
+        seq2seq = load_tf_s2s(filepath, state_dict)
+        detector = init_od_s2s(state_dict, seq2seq)
 
     detector.meta = meta_dict
     return detector
@@ -517,7 +567,7 @@ def load_tf_ae(filepath: str) -> tf.keras.Model:
     filepath
         Save directory.
     state_dict
-        Dictionary containing the latent dimension and beta parameters.
+        Dictionary containing the outlier threshold.
 
     Returns
     -------
@@ -525,7 +575,7 @@ def load_tf_ae(filepath: str) -> tf.keras.Model:
     """
     model_dir = os.path.join(filepath, 'model')
     if not [f for f in os.listdir(model_dir) if not f.startswith('.')]:
-        logger.warning('No encoder, decoder or vae found in {}.'.format(model_dir))
+        logger.warning('No encoder, decoder or ae found in {}.'.format(model_dir))
         return None
     encoder_net = tf.keras.models.load_model(os.path.join(model_dir, 'encoder_net.h5'))
     decoder_net = tf.keras.models.load_model(os.path.join(model_dir, 'decoder_net.h5'))
@@ -616,6 +666,23 @@ def load_tf_vaegmm(filepath: str,
                     state_dict['latent_dim'], state_dict['recon_features'], state_dict['beta'])
     vaegmm.load_weights(os.path.join(model_dir, 'vaegmm.ckpt'))
     return vaegmm
+
+
+def load_tf_s2s(filepath: str,
+                state_dict: Dict) -> tf.keras.Model:
+    model_dir = os.path.join(filepath, 'model')
+    if not [f for f in os.listdir(model_dir) if not f.startswith('.')]:
+        logger.warning('No seq2seq or threshold estimation net found in {}.'.format(model_dir))
+        return None
+    # load threshold estimator net, initialize encoder and decoder and load seq2seq weights
+    threshold_net = tf.keras.models.load_model(os.path.join(model_dir, 'threshold_net.h5'), compile=False)
+    latent_dim = state_dict['latent_dim']
+    n_features = state_dict['shape'][-1]
+    encoder_net = EncoderLSTM(latent_dim)
+    decoder_net = DecoderLSTM(latent_dim, n_features, state_dict['output_activation'])
+    seq2seq = Seq2Seq(encoder_net, decoder_net, threshold_net, n_features, beta=state_dict['beta'])
+    seq2seq.load_weights(os.path.join(model_dir, 'seq2seq.ckpt'))
+    return seq2seq
 
 
 def init_od_ae(state_dict: Dict,
@@ -744,6 +811,33 @@ def init_od_vaegmm(state_dict: Dict,
 
     if not all(tf.is_tensor(_) for _ in [od.phi, od.mu, od.cov, od.L, od.log_det_cov]):
         logger.warning('Loaded VAEGMM detector has not been fit.')
+
+    return od
+
+
+def init_od_s2s(state_dict: Dict,
+                seq2seq: tf.keras.Model) -> OutlierSeq2Seq:
+    """
+    Initialize OutlierSeq2Seq.
+
+    Parameters
+    ----------
+    state_dict
+        Dictionary containing the parameter values.
+    seq2seq
+        Loaded seq2seq model.
+
+    Returns
+    -------
+    Initialized OutlierSeq2Seq instance.
+    """
+    seq_len, n_features = state_dict['shape'][1:]
+    od = OutlierSeq2Seq(n_features,
+                        seq_len,
+                        threshold=state_dict['threshold'],
+                        seq2seq=seq2seq,
+                        latent_dim=state_dict['latent_dim'],
+                        output_activation=state_dict['output_activation'])
 
     return od
 

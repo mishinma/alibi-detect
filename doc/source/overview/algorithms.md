@@ -8,11 +8,13 @@ The following tables summarize the advised use cases for the current algorithms.
 |---|---|---|---|---|
 |[Isolation Forest](../methods/iforest.ipynb)|✔|✘|✘|✘|✔|✘|✘|
 |[Mahalanobis Distance](../methods/mahalanobis.ipynb)|✔|✘|✘|✘|✔|✔|✘|
+|[AE](../methods/ae.ipynb)|✔|✔|✘|✘|✘|✘|✔|
 |[VAE](../methods/vae.ipynb)|✔|✔|✘|✘|✘|✘|✔|
 |[AEGMM](../methods/aegmm.ipynb)|✔|✔|✘|✘|✘|✘|✘|
 |[VAEGMM](../methods/vaegmm.ipynb)|✔|✔|✘|✘|✘|✘|✘|
 |[Prophet](../methods/prophet.ipynb)|✘|✘|✔|✘|✘|✘|✘|
-|[Spectral Residual](../methods/sr.ipynb)|✘|✘|✔|✘|✘|✔|✘|
+|[Spectral Residual](../methods/sr.ipynb)|✘|✘|✔|✘|✘|✔|✔|
+|[Seq2Seq](../methods/seq2seq.ipynb)|✘|✘|✔|✘|✘|✘|✔|
 
 ## Adversarial Detection
 
